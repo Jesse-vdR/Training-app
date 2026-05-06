@@ -105,6 +105,27 @@ body {
   z-index: 5;
 }
 
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.brand-arrow {
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  transition: color 0.15s, transform 0.15s;
+}
+
+.brand-link:hover .brand-arrow,
+.brand-link:active .brand-arrow {
+  color: var(--accent-2);
+  transform: translateX(-2px);
+}
+
 .brand {
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -462,46 +483,38 @@ button.tap:disabled:active { transform: none; }
 }
 
 .grid-cell {
+  position: relative;
   height: 2.1rem;
   background: var(--bg-3);
   border: 1px solid var(--line);
   border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
+  overflow: hidden;
   -webkit-tap-highlight-color: transparent;
 }
 
-.grid-cell.today { border-color: var(--accent-2); }
-.grid-cell.future { opacity: 0.35; }
-.grid-cell.has { background: rgba(124, 58, 237, 0.07); }
-
-.tick {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* Intensity fill: gradient from purple → orange revealed by --pct.
+   --pct = 0 means the gradient is fully transparent; --pct = 1 means
+   it covers the cell at full opacity. */
+.grid-cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--accent), var(--warn));
+  opacity: calc(var(--pct, 0) * 0.92);
+  transition: opacity 0.2s;
 }
 
-.tick-pass    { background: var(--warn); box-shadow: 0 0 6px rgba(245, 158, 11, 0.55); }
-.tick-run     { background: var(--accent-2); box-shadow: 0 0 6px rgba(6, 182, 212, 0.45); }
-.tick-session { background: var(--accent); box-shadow: 0 0 6px rgba(124, 58, 237, 0.55); }
+.grid-cell.today { border-color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2); }
+.grid-cell.future { opacity: 0.4; }
 
 .legend {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.85rem;
-  margin-top: 0.85rem;
-  font-size: 0.72rem;
-  color: var(--muted);
-}
-
-.legend-item {
-  display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  font-size: 0.7rem;
+  color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.04em;
 }
@@ -651,6 +664,44 @@ button.tap:disabled:active { transform: none; }
   white-space: nowrap;
 }
 
+.legend-scale {
+  flex: 0 1 9rem;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--bg-3), var(--accent), var(--warn));
+  border: 1px solid var(--line);
+}
+
+/* ===== Stages tab ===== */
+
+.stages-list { display: block; }
+
+.stage-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.95rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.stage-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.stage-card-name { font-size: 1rem; font-weight: 600; color: var(--fg); }
+
+.stage-card-pos {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 /* Goal cards */
 
 .goal-card {
@@ -756,6 +807,50 @@ button.tap:disabled:active { transform: none; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
   letter-spacing: 0.02em;
+}
+
+.stage-card-next, .stage-card-last {
+  font-size: 0.78rem;
+  margin-top: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+}
+
+.stage-card-last { color: var(--dim); font-size: 0.7rem; }
+
+.ladder {
+  width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.25rem 0 0.1rem;
+}
+
+.ladder-line {
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.ladder-dot {
+  fill: var(--bg-3);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.ladder-dot.done {
+  fill: var(--warn);
+  stroke: var(--warn);
+}
+
+.ladder-dot.next {
+  fill: var(--bg-3);
+  stroke: var(--accent-2);
+  stroke-width: 2;
+}
+
+.ladder-num {
+  fill: var(--dim);
+  font: 600 7px ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.05em;
 }
 
 /* ===== Footer ===== */

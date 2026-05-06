@@ -149,19 +149,41 @@ function currentStage(events, trackSlug) {
   return max;
 }
 
-const HIGHLIGHT_KINDS = ["stage_pass", "run", "session"];
-
-function highlightsByDate(events) {
-  const byDate = {};
-  for (const e of events) {
-    if (!HIGHLIGHT_KINDS.includes(e.kind)) continue;
-    if (!byDate[e.local_date]) byDate[e.local_date] = new Set();
-    byDate[e.local_date].add(e.kind);
-  }
-  return byDate;
+function dayOfWeek(iso) {
+  // Monday = 0, Sunday = 6 — matches isoMonday()
+  return (new Date(iso + "T00:00:00").getDay() + 6) % 7;
 }
 
-function buildWeeks(today, weeks, byDate) {
+function planEntriesForDOW(plan, dow) {
+  // The current plan's day with the same day-of-week becomes the
+  // template for past weeks too — your weekly structure is stable
+  // enough that this is a fair grading. If no plan entry has that
+  // DOW (rest day), there's nothing to grade against.
+  if (!plan) return [];
+  const days = plan.body.days || {};
+  for (const [date, entries] of Object.entries(days)) {
+    if (dayOfWeek(date) === dow) return entries;
+  }
+  return [];
+}
+
+function dayPercentage(events, plan, date) {
+  const entries = planEntriesForDOW(plan, dayOfWeek(date));
+  const dayEvents = events.filter((e) => e.local_date === date);
+  if (entries.length === 0) {
+    // No plan target for this DOW. If anything was logged, give a
+    // small base tint so the day shows up; otherwise zero.
+    return dayEvents.length > 0 ? 0.1 : 0;
+  }
+  let sum = 0;
+  for (const entry of entries) {
+    const done = entryDone(dayEvents, entry.slug, date, entry.unit);
+    sum += Math.min(1, done / entry.target_total);
+  }
+  return sum / entries.length;
+}
+
+function buildWeeks(today, weeks, plan, events) {
   const todayMon = isoMonday(today);
   const rows = [];
   for (let w = 0; w < weeks; w++) {
@@ -171,7 +193,7 @@ function buildWeeks(today, weeks, byDate) {
       const date = isoAddDays(mon, i);
       days.push({
         date,
-        kinds: byDate[date] || new Set(),
+        pct: dayPercentage(events, plan, date),
         future: date > today,
         today: date === today,
       });
@@ -234,7 +256,10 @@ function renderTopbar(state) {
     window.location.reload();
   };
   return el("header", { class: "topbar" },
-    el("div", { class: "brand" }, "training"),
+    el("a", { class: "brand-link", href: "https://jesselab.space/", title: "Back to jesselab.space" },
+      el("span", { class: "brand-arrow", "aria-hidden": "true" }, "←"),
+      el("span", { class: "brand" }, "training"),
+    ),
     el("div", { class: "user" },
       state.user.avatar_url
         ? el("img", { src: state.user.avatar_url, alt: "", class: "avatar" })
@@ -425,6 +450,7 @@ function renderTabs(state, render) {
   const tabs = [
     { key: "today", label: "Today" },
     { key: "project", label: "Project" },
+    { key: "stages", label: "Stages" },
     { key: "settings", label: "Settings" },
   ];
   return el("nav", { class: "tabs" },
@@ -666,6 +692,111 @@ function renderSettingsMain(state, render) {
   );
 }
 
+function renderLadder(track, cur) {
+  const stages = track.stages || [];
+  if (stages.length === 0) return null;
+  const w = 240, gap = 6;
+  const step = (w - gap * (stages.length - 1)) / stages.length;
+  const r = Math.min(8, step * 0.42);
+  const cy = r + 4;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "ladder");
+  svg.setAttribute("viewBox", `0 0 ${w} ${r * 2 + 14}`);
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+  const line = document.createElementNS(ns, "line");
+  line.setAttribute("x1", step / 2);
+  line.setAttribute("x2", w - step / 2);
+  line.setAttribute("y1", cy);
+  line.setAttribute("y2", cy);
+  line.setAttribute("class", "ladder-line");
+  svg.appendChild(line);
+
+  for (let i = 0; i < stages.length; i++) {
+    const s = stages[i];
+    const cx = step / 2 + i * (step + gap);
+    const c = document.createElementNS(ns, "circle");
+    c.setAttribute("cx", cx);
+    c.setAttribute("cy", cy);
+    c.setAttribute("r", r);
+    let cls = "ladder-dot";
+    if (s.n <= cur) cls += " done";
+    else if (s.n === cur + 1) cls += " next";
+    c.setAttribute("class", cls);
+    const title = document.createElementNS(ns, "title");
+    title.textContent = `Stage ${s.n}: ${s.test}`;
+    c.appendChild(title);
+    svg.appendChild(c);
+
+    const txt = document.createElementNS(ns, "text");
+    txt.setAttribute("x", cx);
+    txt.setAttribute("y", cy + r + 9);
+    txt.setAttribute("text-anchor", "middle");
+    txt.setAttribute("class", "ladder-num");
+    txt.textContent = s.n;
+    svg.appendChild(txt);
+  }
+  return svg;
+}
+
+function lastStagePass(events, trackSlug) {
+  let last = null;
+  for (const e of events) {
+    if (e.kind === "stage_pass" && e.track === trackSlug) {
+      if (!last || (e.ts || "") > (last.ts || "")) last = e;
+    }
+  }
+  return last;
+}
+
+function renderStageBlock(state, track) {
+  const cur = currentStage(state.events, track.slug);
+  const total = (track.stages || []).length;
+  const next = (track.stages || []).find((s) => s.n === cur + 1);
+  const last = lastStagePass(state.events, track.slug);
+
+  return el("article", { class: "stage-card" },
+    el("header", { class: "stage-card-head" },
+      el("span", { class: "stage-card-name" }, track.display),
+      el("span", { class: "stage-card-pos" }, `stage ${cur} of ${total}`),
+    ),
+    renderLadder(track, cur),
+    next
+      ? el("p", { class: "stage-card-next muted" },
+          `Next — stage ${next.n}: ${next.test}`)
+      : el("p", { class: "stage-card-next muted" }, "All stages cleared."),
+    last
+      ? el("p", { class: "stage-card-last muted" },
+          `Last pass: stage ${last.stage} · `
+          + (last.local_date || (last.ts || "").slice(0, 10))
+          + (last.note ? ` · ${last.note}` : ""))
+      : null,
+  );
+}
+
+function renderStagesMain(state) {
+  if (!state.tracks.length) {
+    return el("main", { class: "stage" },
+      el("section", { class: "empty" },
+        el("p", {}, "No tracks defined."),
+        el("p", { class: "muted" }, "Tracks land via the import script or the (upcoming) settings view."),
+      ),
+    );
+  }
+  return el("main", { class: "stage" },
+    el("header", { class: "day-header" },
+      el("div", { class: "eyebrow" },
+        el("span", { class: "dot" }),
+        el("span", {}, `${state.tracks.length} tracks`),
+      ),
+    ),
+    el("section", { class: "stages-list" },
+      ...state.tracks.map((t) => renderStageBlock(state, t)),
+    ),
+  );
+}
+
 function renderTodayMain(state, render) {
   return el("main", { class: "stage" },
     renderDayHeader(state, render),
@@ -675,23 +806,22 @@ function renderTodayMain(state, render) {
 }
 
 function renderProjectMain(state) {
-  const byDate = highlightsByDate(state.events);
-  const rows = buildWeeks(state.today, 12, byDate);
+  const rows = buildWeeks(state.today, 12, state.plan, state.events);
   const dayLetters = ["M", "T", "W", "T", "F", "S", "S"];
-  const hasAny = rows.some((r) => r.days.some((d) => d.kinds.size > 0));
+  const hasAny = rows.some((r) => r.days.some((d) => d.pct > 0));
 
   return el("main", { class: "stage" },
     el("header", { class: "day-header" },
       el("div", { class: "eyebrow" },
         el("span", { class: "dot" }),
-        el("span", {}, "Last 12 weeks"),
+        el("span", {}, "Last 12 weeks · % of plan"),
       ),
     ),
     hasAny
       ? null
       : el("section", { class: "empty" },
-          el("p", {}, "No stage passes, runs, or sessions yet."),
-          el("p", { class: "muted" }, "Log on the Today tab and they'll show up here."),
+          el("p", {}, "Nothing logged yet."),
+          el("p", { class: "muted" }, "Tap a + on the Today tab to start filling cells."),
         ),
     el("section", { class: "grid" },
       el("div", { class: "grid-row grid-head" },
@@ -703,25 +833,18 @@ function renderProjectMain(state) {
         ...row.days.map((day) => el("div", {
           class: "grid-cell"
             + (day.today ? " today" : "")
-            + (day.future ? " future" : "")
-            + (day.kinds.size > 0 ? " has" : ""),
-          title: day.kinds.size
-            ? `${day.date} · ${[...day.kinds].join(", ")}`
+            + (day.future ? " future" : ""),
+          style: { "--pct": day.pct.toFixed(3) },
+          title: day.pct > 0
+            ? `${day.date} · ${Math.round(day.pct * 100)}% of plan`
             : day.date,
-        },
-          day.kinds.has("stage_pass") ? el("span", { class: "tick tick-pass" }) : null,
-          day.kinds.has("run") ? el("span", { class: "tick tick-run" }) : null,
-          day.kinds.has("session") ? el("span", { class: "tick tick-session" }) : null,
-        )),
+        })),
       )),
     ),
     el("section", { class: "legend" },
-      el("div", { class: "legend-item" },
-        el("span", { class: "tick tick-pass" }), "Stage pass"),
-      el("div", { class: "legend-item" },
-        el("span", { class: "tick tick-run" }), "Run"),
-      el("div", { class: "legend-item" },
-        el("span", { class: "tick tick-session" }), "Session"),
+      el("span", { class: "muted" }, "0%"),
+      el("div", { class: "legend-scale" }),
+      el("span", { class: "muted" }, "100%"),
     ),
   );
 }
@@ -730,6 +853,7 @@ function renderHome(root, state) {
   const render = () => renderHome(root, state);
   let main;
   if (state.view === "project") main = renderProjectMain(state);
+  else if (state.view === "stages") main = renderStagesMain(state);
   else if (state.view === "settings") main = renderSettingsMain(state, render);
   else main = renderTodayMain(state, render);
   root.replaceChildren(
@@ -819,7 +943,7 @@ const SETTINGS_SECTIONS = ["plan", "goals", "tracks", "profile", "long-term"];
 function storedView() {
   try {
     const v = localStorage.getItem("view");
-    if (v === "today" || v === "project" || v === "settings") return v;
+    if (v === "today" || v === "project" || v === "stages" || v === "settings") return v;
   } catch {}
   return "today";
 }
