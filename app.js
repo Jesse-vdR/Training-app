@@ -65,6 +65,15 @@ const postEvent = (apiBase, payload) =>
     body: JSON.stringify(payload),
   });
 
+const postAgentJob = (apiBase, payload) =>
+  api(apiBase, "/v1/agents/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+const getAgentJob = (apiBase, id) => api(apiBase, `/v1/agents/jobs/${id}`);
+
 // ----- Helpers -----
 
 function isoFromDate(d) {
@@ -93,6 +102,10 @@ function isoMonday(iso) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return isoFromDate(d);
+}
+
+function nextMonday(iso) {
+  return isoAddDays(isoMonday(iso), 7);
 }
 
 function monthDay(iso) {
@@ -513,43 +526,146 @@ function jsonBlock(value) {
   return el("pre", { class: "json" }, JSON.stringify(value, null, 2));
 }
 
-function settingsPlan(state) {
-  if (!state.plan) {
-    return settingsEmpty(
-      "No plan in the database.",
-      "Tap \"Generate next week's plan\" once that button lands.",
-    );
-  }
-  const days = state.plan.body.days || {};
-  const dayKeys = Object.keys(days).sort();
+function settingsPlan(state, render) {
+  const target = nextMonday(state.today);
+  const upToDate = state.plan && state.plan.week_start === target;
+
   return el("section", { class: "settings-body" },
-    settingsHeader(
-      `Week of ${state.plan.week_start} · ${state.plan.generated_by}`,
-      "Current plan",
-    ),
-    el("div", { class: "plan-summary" },
-      ...dayKeys.map((d) =>
-        el("div", { class: "plan-day" },
-          el("div", { class: "plan-day-h" }, dayLabel(d)),
-          (days[d].length === 0)
-            ? el("p", { class: "muted" }, "rest")
-            : el("ul", { class: "plan-day-list" },
-                ...days[d].map((entry) =>
-                  el("li", {},
-                    el("span", { class: "plan-entry-name" }, entry.display),
-                    el("span", { class: "plan-entry-spec" },
-                      planEntrySpec(entry)),
-                  ),
+    state.plan
+      ? settingsHeader(
+          `Week of ${state.plan.week_start} · ${state.plan.generated_by}`,
+          "Current plan",
+        )
+      : settingsHeader("No plan yet", "Plan"),
+    renderGeneratePlanCard(state, render, target, upToDate),
+    state.plan ? renderPlanSummary(state.plan) : null,
+    state.plan
+      ? el("details", { class: "settings-raw" },
+          el("summary", {}, "Raw JSON"),
+          jsonBlock(state.plan.body),
+        )
+      : null,
+  );
+}
+
+function renderPlanSummary(plan) {
+  const days = plan.body.days || {};
+  const dayKeys = Object.keys(days).sort();
+  return el("div", { class: "plan-summary" },
+    ...dayKeys.map((d) =>
+      el("div", { class: "plan-day" },
+        el("div", { class: "plan-day-h" }, dayLabel(d)),
+        (days[d].length === 0)
+          ? el("p", { class: "muted" }, "rest")
+          : el("ul", { class: "plan-day-list" },
+              ...days[d].map((entry) =>
+                el("li", {},
+                  el("span", { class: "plan-entry-name" }, entry.display),
+                  el("span", { class: "plan-entry-spec" },
+                    planEntrySpec(entry)),
                 ),
               ),
-        ),
+            ),
       ),
     ),
-    el("details", { class: "settings-raw" },
-      el("summary", {}, "Raw JSON"),
-      jsonBlock(state.plan.body),
-    ),
   );
+}
+
+function renderGeneratePlanCard(state, render, target, upToDate) {
+  const job = state.agentJob;
+  const inFlight = !!job && job.status !== "succeeded" && job.status !== "failed";
+  const elapsedS = job && job._local_started
+    ? Math.round((Date.now() - job._local_started) / 1000)
+    : 0;
+  const statusLabel = !job
+    ? null
+    : job.status === "queued" ? `Queued · ${elapsedS}s`
+    : job.status === "running" ? `Generating · ${elapsedS}s`
+    : null;
+
+  return el("div", { class: "generate-card" },
+    el("div", { class: "generate-card-h" },
+      el("span", { class: "generate-card-title" },
+        upToDate ? "Plan ready for next week" : "Generate next week's plan"),
+      el("span", { class: "generate-card-target muted" }, `target: ${target}`),
+    ),
+    el("button", {
+      class: "btn-primary generate-btn",
+      disabled: inFlight ? "" : null,
+      onclick: () => generatePlan(state, render, target),
+    }, statusLabel || (upToDate ? "Re-generate" : "Generate")),
+    state.agentJobError
+      ? el("p", { class: "generate-error" }, state.agentJobError)
+      : null,
+    job && job.status === "succeeded"
+      ? el("p", { class: "generate-ok muted" },
+          `Done in ${elapsedS}s. Plan refreshed.`)
+      : null,
+  );
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function generatePlan(state, render, week_start) {
+  const apiBase = state.apiBase;
+  const start = Date.now();
+  state.agentJobError = null;
+  state.agentJob = { status: "queued", _local_started: start };
+  render();
+
+  let job;
+  try {
+    job = await postAgentJob(apiBase, {
+      kind: "generate_plan",
+      input: { week_start },
+    });
+  } catch (err) {
+    state.agentJob = null;
+    state.agentJobError = `Couldn't enqueue job: ${err.message}`;
+    render();
+    return;
+  }
+  state.agentJob = { ...job, _local_started: start };
+  render();
+
+  const TIMEOUT_MS = 120_000;
+  const POLL_MS = 2000;
+
+  while (Date.now() - start < TIMEOUT_MS) {
+    await sleep(POLL_MS);
+    let updated;
+    try {
+      updated = await getAgentJob(apiBase, job.id);
+    } catch (err) {
+      state.agentJob = null;
+      state.agentJobError = `Lost contact with job ${job.id}: ${err.message}`;
+      render();
+      return;
+    }
+    state.agentJob = { ...updated, _local_started: start };
+    render();
+
+    if (updated.status === "succeeded") {
+      try {
+        const plans = await listPlans(apiBase);
+        if (plans[0]) state.plan = plans[0];
+      } catch {}
+      render();
+      toast(`Plan generated for week of ${week_start}`, "success");
+      return;
+    }
+    if (updated.status === "failed") {
+      state.agentJobError = updated.error || "Job failed without an error message.";
+      state.agentJob = null;
+      render();
+      return;
+    }
+  }
+
+  state.agentJobError =
+    `Job ${job.id} still running after 2 min — refresh to check.`;
+  state.agentJob = null;
+  render();
 }
 
 function planEntrySpec(entry) {
@@ -688,7 +804,7 @@ function renderSettingsMain(state, render) {
   const fn = sections[state.settingsSection] || settingsPlan;
   return el("main", { class: "stage" },
     renderSettingsSubnav(state, render),
-    fn(state),
+    fn(state, render),
   );
 }
 
@@ -867,8 +983,8 @@ function renderHome(root, state) {
 
 // ----- Toast -----
 
-function toast(message) {
-  const node = el("div", { class: "toast" }, message);
+function toast(message, variant = "error") {
+  const node = el("div", { class: `toast toast-${variant}` }, message);
   document.body.append(node);
   setTimeout(() => node.classList.add("show"), 10);
   setTimeout(() => {
@@ -934,6 +1050,8 @@ async function bootstrap() {
     viewDate: pickViewDate(plan, today),
     view: storedView(),
     settingsSection: storedSettingsSection(),
+    agentJob: null,
+    agentJobError: null,
   };
   renderHome(root, state);
 }
