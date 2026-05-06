@@ -4,7 +4,7 @@ Vanilla-JS PWA for the training subsystem. Reads from / writes to [`personal-api
 
 ## Status
 
-Phase 3 — today view + stage_pass logging. Signed-in app fetches the latest plan, the user's tracks, and all events; renders the day's plan items with tap-to-log buttons and a per-track "Pass next stage" section. Project view and the service worker land in subsequent phases.
+Phase 4 — project view + tab nav. Today / Project tabs persist via localStorage. Project view renders the last 12 weeks as a Mon–Sun grid with per-kind dots for stage passes / runs / sessions. Service worker + install manifest land next.
 
 ## Local dev
 

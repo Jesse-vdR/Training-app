@@ -55,17 +55,39 @@ const postEvent = (apiBase, payload) =>
 
 // ----- Helpers -----
 
-function todayLocalISO() {
-  const d = new Date();
+function isoFromDate(d) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function todayLocalISO() {
+  return isoFromDate(new Date());
 }
 
 function dayLabel(iso) {
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const d = new Date(iso + "T00:00:00");
   return `${days[d.getDay()]} · ${iso}`;
+}
+
+function isoAddDays(iso, n) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return isoFromDate(d);
+}
+
+function isoMonday(iso) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return isoFromDate(d);
+}
+
+function monthDay(iso) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const d = new Date(iso + "T00:00:00");
+  return `${months[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
 }
 
 function el(tag, attrs, ...children) {
@@ -113,6 +135,38 @@ function currentStage(events, trackSlug) {
     }
   }
   return max;
+}
+
+const HIGHLIGHT_KINDS = ["stage_pass", "run", "session"];
+
+function highlightsByDate(events) {
+  const byDate = {};
+  for (const e of events) {
+    if (!HIGHLIGHT_KINDS.includes(e.kind)) continue;
+    if (!byDate[e.local_date]) byDate[e.local_date] = new Set();
+    byDate[e.local_date].add(e.kind);
+  }
+  return byDate;
+}
+
+function buildWeeks(today, weeks, byDate) {
+  const todayMon = isoMonday(today);
+  const rows = [];
+  for (let w = 0; w < weeks; w++) {
+    const mon = isoAddDays(todayMon, -7 * w);
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const date = isoAddDays(mon, i);
+      days.push({
+        date,
+        kinds: byDate[date] || new Set(),
+        future: date > today,
+        today: date === today,
+      });
+    }
+    rows.push({ mon, days });
+  }
+  return rows;
 }
 
 function buildEventPayload(entry, viewDate) {
@@ -355,15 +409,95 @@ function renderStageSection(state, render) {
   );
 }
 
+function renderTabs(state, render) {
+  const tabs = [
+    { key: "today", label: "Today" },
+    { key: "project", label: "Project" },
+  ];
+  return el("nav", { class: "tabs" },
+    ...tabs.map((t) =>
+      el("button", {
+        class: "tab" + (state.view === t.key ? " active" : ""),
+        onclick: () => {
+          if (state.view === t.key) return;
+          state.view = t.key;
+          try { localStorage.setItem("view", t.key); } catch {}
+          render();
+        },
+      }, t.label),
+    ),
+  );
+}
+
+function renderTodayMain(state, render) {
+  return el("main", { class: "stage" },
+    renderDayHeader(state, render),
+    renderPlanSection(state, render),
+    renderStageSection(state, render),
+  );
+}
+
+function renderProjectMain(state) {
+  const byDate = highlightsByDate(state.events);
+  const rows = buildWeeks(state.today, 12, byDate);
+  const dayLetters = ["M", "T", "W", "T", "F", "S", "S"];
+  const hasAny = rows.some((r) => r.days.some((d) => d.kinds.size > 0));
+
+  return el("main", { class: "stage" },
+    el("header", { class: "day-header" },
+      el("div", { class: "eyebrow" },
+        el("span", { class: "dot" }),
+        el("span", {}, "Last 12 weeks"),
+      ),
+    ),
+    hasAny
+      ? null
+      : el("section", { class: "empty" },
+          el("p", {}, "No stage passes, runs, or sessions yet."),
+          el("p", { class: "muted" }, "Log on the Today tab and they'll show up here."),
+        ),
+    el("section", { class: "grid" },
+      el("div", { class: "grid-row grid-head" },
+        el("div", { class: "grid-date" }),
+        ...dayLetters.map((d) => el("div", { class: "grid-day" }, d)),
+      ),
+      ...rows.map((row) => el("div", { class: "grid-row" },
+        el("div", { class: "grid-date" }, monthDay(row.mon)),
+        ...row.days.map((day) => el("div", {
+          class: "grid-cell"
+            + (day.today ? " today" : "")
+            + (day.future ? " future" : "")
+            + (day.kinds.size > 0 ? " has" : ""),
+          title: day.kinds.size
+            ? `${day.date} · ${[...day.kinds].join(", ")}`
+            : day.date,
+        },
+          day.kinds.has("stage_pass") ? el("span", { class: "tick tick-pass" }) : null,
+          day.kinds.has("run") ? el("span", { class: "tick tick-run" }) : null,
+          day.kinds.has("session") ? el("span", { class: "tick tick-session" }) : null,
+        )),
+      )),
+    ),
+    el("section", { class: "legend" },
+      el("div", { class: "legend-item" },
+        el("span", { class: "tick tick-pass" }), "Stage pass"),
+      el("div", { class: "legend-item" },
+        el("span", { class: "tick tick-run" }), "Run"),
+      el("div", { class: "legend-item" },
+        el("span", { class: "tick tick-session" }), "Session"),
+    ),
+  );
+}
+
 function renderHome(root, state) {
   const render = () => renderHome(root, state);
+  const main = state.view === "project"
+    ? renderProjectMain(state)
+    : renderTodayMain(state, render);
   root.replaceChildren(
     renderTopbar(state),
-    el("main", { class: "stage" },
-      renderDayHeader(state, render),
-      renderPlanSection(state, render),
-      renderStageSection(state, render),
-    ),
+    renderTabs(state, render),
+    main,
     el("footer", { class: "appfoot" }, meta(state.apiBase, state.sha)),
   );
   root.removeAttribute("aria-busy");
@@ -433,8 +567,17 @@ async function bootstrap() {
     plan, tracks, events,
     today,
     viewDate: pickViewDate(plan, today),
+    view: storedView(),
   };
   renderHome(root, state);
+}
+
+function storedView() {
+  try {
+    const v = localStorage.getItem("view");
+    if (v === "today" || v === "project") return v;
+  } catch {}
+  return "today";
 }
 
 bootstrap();
