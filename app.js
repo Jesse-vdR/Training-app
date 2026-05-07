@@ -4,6 +4,8 @@
 // then renders the today view with tap-to-log buttons. Stage passes
 // land via the same /v1/training/events endpoint.
 
+import { Shell, heatColor } from "/shell/shell.js";
+
 // ----- API -----
 
 async function loadConfig() {
@@ -1438,6 +1440,14 @@ async function bootstrap() {
     return;
   }
   const apiBase = config.api_base;
+
+  // Shell.mount happens before the user check so the topbar appears
+  // on the login screen too (with a SIGN IN link in the user widget).
+  Shell.mount({
+    mode: "subapp",
+    apiBase,
+    homeUrl: "https://jesselab.space/",
+  });
 
   let user = null;
   try {
