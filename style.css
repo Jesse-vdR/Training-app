@@ -223,23 +223,14 @@
 
 .ex.done .ex-count { color: var(--heat-12); }
 
+/* Compact override of .shell-btn-primary used inside .ex.
+ * Color comes from --btn-color set per-instance by app.js (heatColor). */
 button.tap {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  color: var(--fg);
   padding: 0.55rem 1.05rem;
-  border-radius: 10px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92rem;
-  font-weight: 600;
   min-width: 4.25rem;
-  cursor: pointer;
-  transition: all 0.15s;
-  -webkit-tap-highlight-color: transparent;
 }
-
-button.tap:active { transform: scale(0.95); border-color: var(--accent-cool); }
-.ex.done button.tap { border-color: rgba(220, 38, 38, 0.4); color: var(--heat-12); }
+button.tap:active { transform: scale(0.95); }
 button.tap:disabled { opacity: 0.35; cursor: default; }
 button.tap:disabled:active { transform: none; }
 

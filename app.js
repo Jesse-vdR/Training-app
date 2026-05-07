@@ -394,21 +394,38 @@ function renderEntry(state, entry, render) {
     }
   };
 
+  // Segmented gradient bar — 12 cells max, fewer if target_total is smaller.
+  const cellCount = Math.min(12, Math.max(1, entry.target_total));
+  const litCells = Math.round((done / entry.target_total) * cellCount);
+  const cells = [];
+  for (let i = 0; i < cellCount; i++) {
+    cells.push(el("div", {
+      class: `shell-bar-seg__cell${i < litCells ? " is-on" : ""}`,
+    }));
+  }
+  const bar = el("div", { class: "shell-bar-seg" }, ...cells);
+
+  // Dynamic TAP button — color matches the next cell about to light.
+  const btnColor = heatColor(done, entry.target_total);
+
   return el("div", {
     class: "ex" + (isDone ? " done" : ""),
-    style: { "--pct": `${pct}%` },
   },
     el("div", { class: "ex-header" },
       el("span", { class: "ex-title" }, entry.display),
       el("span", { class: "ex-spec" }, spec),
     ),
-    el("div", { class: "progress-bar" }),
+    bar,
     el("div", { class: "ex-footer" },
       el("span", { class: "ex-count" }, count),
       el("button", {
-        class: "tap",
-        disabled: !canLog ? "" : null,
+        class: "shell-btn-primary tap",
+        style: {
+          "--btn-color": btnColor,
+          "--btn-glow": `${btnColor}73`,
+        },
         onclick: onTap,
+        disabled: !canLog || (entry.unit === "session" && isDone) ? "" : null,
       }, btnLabel),
     ),
   );
