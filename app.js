@@ -28,20 +28,6 @@ async function api(apiBase, path, opts = {}) {
   return res.status === 204 ? null : res.json();
 }
 
-async function getMe(apiBase) {
-  const res = await fetch(`${apiBase}/v1/me`, { credentials: "include" });
-  if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`/v1/me failed: ${res.status}`);
-  return res.json();
-}
-
-async function logout(apiBase) {
-  await fetch(`${apiBase}/v1/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-  });
-}
-
 const listPlans = (apiBase) => api(apiBase, "/v1/training/plans");
 const listTracks = (apiBase) => api(apiBase, "/v1/training/tracks");
 const listEvents = (apiBase) => api(apiBase, "/v1/training/events");
@@ -317,26 +303,6 @@ function renderError(root, message, ctx = {}) {
 }
 
 // ----- Render: signed-in shell -----
-
-function renderTopbar(state) {
-  const onSignOut = async () => {
-    await logout(state.apiBase);
-    window.location.reload();
-  };
-  return el("header", { class: "topbar" },
-    el("a", { class: "brand-link", href: "https://jesselab.space/", title: "Back to jesselab.space" },
-      el("span", { class: "brand-arrow", "aria-hidden": "true" }, "←"),
-      el("span", { class: "brand" }, "homepage"),
-    ),
-    el("div", { class: "user" },
-      state.user.avatar_url
-        ? el("img", { src: state.user.avatar_url, alt: "", class: "avatar" })
-        : null,
-      el("span", { class: "user-name" }, state.user.name || state.user.email),
-      el("button", { class: "btn-link", onclick: onSignOut }, "Sign out"),
-    ),
-  );
-}
 
 function renderDayHeader(state, render) {
   const days = state.plan
@@ -1434,7 +1400,6 @@ function renderHome(root, state) {
   else if (state.view === "settings") main = renderSettingsMain(state, render);
   else main = renderTodayMain(state, render);
   root.replaceChildren(
-    renderTopbar(state),
     renderTabs(state, render),
     main,
     el("footer", { class: "appfoot" }, meta(state.apiBase, state.sha)),
@@ -1474,13 +1439,11 @@ async function bootstrap() {
   }
   const apiBase = config.api_base;
 
-  let user;
+  let user = null;
   try {
-    user = await getMe(apiBase);
-  } catch (err) {
-    renderError(root, `Couldn't reach API: ${err.message}`, { apiBase, sha });
-    return;
-  }
+    const res = await fetch(`${apiBase}/v1/me`, { credentials: "include" });
+    if (res.status !== 401 && res.ok) user = await res.json();
+  } catch { /* offline — fall through to login screen */ }
   if (!user) {
     renderLogin(root, { apiBase, sha });
     return;
